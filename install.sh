@@ -31,6 +31,9 @@
 set -eu
 
 NODE_VERSION="22.23.3"
+# process.versions.modules of Node 22. The native modules in the tarball are built
+# for it, so any other Node (24 included) can load the code but not the database.
+NODE_ABI="127"
 NODE_SHA256_X64="1084aa36196bba4c3a5e69a1ee388a6e4ff729dad09445fbcd434b28fe3c24af"
 NODE_SHA256_ARM64="5ced2d48d1d7198739b7f86804de0171aefb6823b684b12341d3321afc3cb0b2"
 RELEASE_ROOT="https://github.com/Memories-ai-labs/luci-core-releases/releases"
@@ -292,19 +295,19 @@ install_libs() {
 
 # ---------------------------------------------------------------- 3. node
 
-node_major() { "$1" -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || echo 0; }
+node_abi() { "$1" -p 'process.versions.modules' 2>/dev/null || echo 0; }
 
 record_node() { # path; lets the shims find Node when the service PATH is minimal
   [ "$DRY" = 1 ] || { mkdir -p "$CORE_DIR" && printf '%s\n' "$1" >"$CORE_DIR/node-path"; }
 }
 
 ensure_node() {
-  if have node && [ "$(node_major node)" -ge 22 ]; then
+  if have node && [ "$(node_abi node)" = "$NODE_ABI" ]; then
     say "Node: using $(command -v node) ($(node -v))"
     record_node "$(command -v node)"
     return 0
   fi
-  if [ -x "$CORE_DIR/node/bin/node" ] && [ "$(node_major "$CORE_DIR/node/bin/node")" -ge 22 ]; then
+  if [ -x "$CORE_DIR/node/bin/node" ] && [ "$(node_abi "$CORE_DIR/node/bin/node")" = "$NODE_ABI" ]; then
     say "Node: using bundled $("$CORE_DIR/node/bin/node" -v)"
     return 0
   fi
