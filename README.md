@@ -47,10 +47,10 @@ curl -fsSL https://raw.githubusercontent.com/Memories-ai-labs/luci-core-releases
 Then register a stdio MCP server:
 
 ```json
-{"command": "/home/<user>/.luci/bin/luci", "args": ["mcp"], "env": {"LUCI_CLIENT": "grokbot:<bot-name>"}}
+{"command": "/home/<user>/.luci/bin/luci", "args": ["mcp"], "env": {"LUCI_CLIENT": "grokbot:<bot-name>", "LUCI_DISPLAY": ":5"}}
 ```
 
-Add `"LUCI_DISPLAY": ":2"` to `env` when the bot works on a specific screen. `LUCI_CLIENT` labels the bot's calls (letters, digits, `_ : -`, up to 64 characters).
+`LUCI_DISPLAY` is the bot's own screen, the value of `$DISPLAY` in its shell. The installer fills it in when `$DISPLAY` is set. With it, tool calls that don't name a screen read and search that one; without it they cover every screen, and `screen_now` reads whichever has focus. `LUCI_CLIENT` labels the bot's calls (letters, digits, `_ : -`, up to 64 characters).
 
 ### Muse
 
@@ -62,14 +62,31 @@ npx skills add Memories-ai-labs/Luci-skills
 
 The bot runs `luci now` and `luci search "..." --tr 24h`. Muse Code can also register the MCP server as above.
 
+Agents often run each command in a fresh shell, where `~/.local/bin` may not be on `PATH`. Then call the CLI by its full path, `~/.luci/bin/luci`; the installer prints whichever one works.
+
 ### OpenClaw
 
 Install, then either use the `luci` CLI or add the stdio command above to OpenClaw's MCP configuration (field names depend on your OpenClaw version).
 
+### Let the bot install it
+
+Paste this to a bot on its cloud desktop:
+
+```
+Install Luci Core on this machine and connect it to yourself. Show me the full output of each step. If a step fails, stop and show me; don't work around it.
+
+1. Run: curl -fsSL https://raw.githubusercontent.com/Memories-ai-labs/luci-core-releases/main/install.sh | sh -s -- --data-dir /workspace/.luci
+   If /workspace doesn't exist, leave out everything after "| sh".
+2. Register the MCP server exactly as the installer's "As one JSON block" line says. Put your own name after "grokbot:".
+3. Check it: open a terminal or text window on your screen that shows the line LUCI TEST 4821. Then run the "now" command the installer printed, and confirm the output contains LUCI TEST 4821.
+
+Always use the luci path the installer printed. Luci only sees what is drawn on your screen, so open browsers and apps in a window, not headless.
+```
+
 ## Everyday commands
 
 ```
-luci now                          # what is on the screen right now
+luci now                          # what is on your screen ($DISPLAY) right now
 luci now --display :1 --json      # one screen, as JSON
 luci search "invoice" --tr 24h    # search the last 24 hours
 luci-core status                  # is it running, which screens
@@ -81,6 +98,15 @@ Every X display is its own screen. One Xvfb per bot keeps their histories apart:
 ```
 Xvfb :1 -screen 0 1280x800x24 -nolisten tcp &
 ```
+
+## What Luci can see
+
+Luci reads what is drawn on an X screen, nothing else:
+
+- Browsers and apps must run in a window on a screen. Headless browsers (headless Chrome, Playwright with `headless: true`) and plain terminal output never reach a screen, so Luci can't see them.
+- An idle desktop with no open window reads as empty. That is not an error.
+- Text comes from the app's accessibility tree when the desktop session provides one, otherwise from recognizing the pixels. English is included; add `--ocr-lang zh` for Chinese.
+- App names are what the window reports. A wrapped browser can show up as its wrapper's name (for example `box-chrome`), so check `luci usage` before filtering with `--app`.
 
 ## Verify a download by hand
 
