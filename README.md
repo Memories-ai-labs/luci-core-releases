@@ -64,7 +64,7 @@ Install, then either use the `luci` CLI or add the stdio command above to OpenCl
 
 ### Let the bot install it
 
-Paste this to the bot. On Grok Bot (2026-10-03) a brand-new bot with no other instructions installed Luci, registered the MCP server itself and read its own screen; asked later which apps had been on its screen, it answered from Luci without being told to.
+Paste this to the bot. On Grok Bot (2026-10-03) a brand-new bot with no other instructions installed Luci, registered the MCP server itself and read its own screen; asked later which apps had been on its screen, it answered from Luci without being told to. On Muse it installs, falls back to the CLI and reports that there is no screen to see.
 
 ```
 Install Luci on your computer so you can see and search what has been on its screens. Show me the output of each step. If a step fails, stop and show me; don't work around it.
@@ -73,7 +73,8 @@ Install Luci on your computer so you can see and search what has been on its scr
    curl -fsSL https://raw.githubusercontent.com/Memories-ai-labs/luci-core-releases/main/install.sh | sh -s -- --data-dir /workspace/.luci
    If /workspace doesn't exist, run it without "-s -- --data-dir /workspace/.luci".
 2. Connect it: add an MCP server exactly as the installer's "As one JSON block" line says, with your name after "grokbot:". If you can't add MCP servers, skip this and use the luci command the installer printed instead.
-3. Check it: open a window on your screen that shows the text LUCI TEST 4821 (a terminal or text editor), wait 5 seconds, then call the screen_now tool (or run the printed "luci now" command). It should return LUCI TEST 4821.
+3. Check it: open a window on your screen that shows the text LUCI TEST 4821. Use whatever is installed (a terminal such as xfce4-terminal, a text editor, or a local page in your browser); if one program is missing, try another, that is not a failure. Wait 5 seconds, then call the screen_now tool (or run the printed "luci now" command). It should return LUCI TEST 4821.
+   If the installer said no display was found, skip this check and tell me that Luci is installed but this computer has no screen for it to see.
 
 From now on, when I ask what is or was on your screen, what you did earlier, or to find something you saw before, use Luci (screen_now, full_text_search, usage_summary, or the luci command) instead of guessing. Luci only sees what is drawn on a screen, so open browsers and apps in a window, not headless.
 ```
