@@ -734,29 +734,21 @@ print_summary() {
   [ "$DRY" = 0 ] || return 0
   # Agents run each command in a fresh shell, where a PATH hint doesn't stick: show a path that works.
   case ":$PATH:" in *":$LOCAL_BIN:"*) CLI_CMD=luci ;; *) CLI_CMD="$BIN_DIR/luci" ;; esac
-  # The caller's own screen, when $DISPLAY names a local X display (:5 or :5.0).
-  MY_DISPLAY=$(printf '%s' "${DISPLAY:-}" | sed -n 's/^:\([0-9][0-9]*\)\(\.[0-9][0-9]*\)\{0,1\}$/:\1/p')
-  ENV_JSON='"LUCI_CLIENT": "grokbot:<bot-name>"'
-  [ -z "$MY_DISPLAY" ] || ENV_JSON="$ENV_JSON, \"LUCI_DISPLAY\": \"$MY_DISPLAY\""
   say ""
   if [ "$NO_START" = 1 ]; then say "Luci core is installed (not started)."; else say "Luci is running."; fi
-  [ -z "$MY_DISPLAY" ] || say "Your screen: $MY_DISPLAY (from \$DISPLAY). Luci records every X screen on this machine."
   say "Register it with your agent as a stdio MCP server:"
   say "  command: $BIN_DIR/luci"
   say '  args:    ["mcp"]'
-  if [ -n "$MY_DISPLAY" ]; then
-    say "  env:     LUCI_CLIENT=grokbot:<bot-name> LUCI_DISPLAY=$MY_DISPLAY"
-  else
-    say "  env:     LUCI_CLIENT=grokbot:<bot-name>"
-  fi
+  say "  env:     LUCI_CLIENT=grokbot:<bot-name>"
   say "As one JSON block:"
-  say "  {\"command\": \"$(json_escape "$BIN_DIR/luci")\", \"args\": [\"mcp\"], \"env\": {$ENV_JSON}}"
+  say "  {\"command\": \"$(json_escape "$BIN_DIR/luci")\", \"args\": [\"mcp\"], \"env\": {\"LUCI_CLIENT\": \"grokbot:<bot-name>\"}}"
   say "Or use the CLI (Muse, OpenClaw, any terminal agent):"
   say "  $CLI_CMD now                        # what is on your screen right now"
   say "  $CLI_CMD search \"invoice\" --tr 24h  # search the last 24 hours"
   say "  $CLI_CMD --help                     # every command"
   say "Skill for agents that read SKILL.md:  npx skills add Memories-ai-labs/Luci-skills"
   say "Luci sees what is drawn on a screen. Open browsers and apps in a window, not headless; an idle desktop reads as empty."
+  say "It records every X screen here. Without --display, now reads the one in use; add --display :1 to pick one."
   case $DISPLAY_KIND in
     wayland) say "Note: Wayland sessions aren't captured yet." ;;
     none) say "Note: no display found, so nothing is captured until one exists." ;;
