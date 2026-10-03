@@ -8,7 +8,7 @@ This repository holds the installer and the release downloads. The source code i
 
 - Linux on x86_64. arm64 has no release yet.
 - An X11 display or Xvfb. Wayland sessions are not captured.
-- `curl` and `tar`. The installer fetches Node 22 if the machine has none, and installs the runtime libraries it can (with `sudo` or as root).
+- `curl` and `tar`. The installer fetches Node 22 unless the machine already has Node 22 (a newer Node can't load its database module), and installs the runtime libraries it can (with `sudo` or as root).
 
 ## Install
 
@@ -54,13 +54,7 @@ Then register a stdio MCP server:
 
 ### Muse
 
-Muse uses the CLI. Install, then give the bot the Luci skill:
-
-```
-npx skills add Memories-ai-labs/Luci-skills
-```
-
-The bot runs `luci now` and `luci search "..." --tr 24h`. Muse Code can also register the MCP server as above.
+Luci can install on a Muse computer but has nothing to see there yet. Muse browses with a remote, managed browser that draws on no screen of that machine (no X11, Wayland or VNC; checked 2026-10-03), so Luci records nothing. Muse also can't register its own MCP servers; it would call the `luci` CLI.
 
 Agents often run each command in a fresh shell, where `~/.local/bin` may not be on `PATH`. Then call the CLI by its full path, `~/.luci/bin/luci`; the installer prints whichever one works.
 
@@ -70,17 +64,18 @@ Install, then either use the `luci` CLI or add the stdio command above to OpenCl
 
 ### Let the bot install it
 
-Paste this to a bot on its cloud desktop:
+Paste this to the bot. On Grok Bot (2026-10-03) a brand-new bot with no other instructions installed Luci, registered the MCP server itself and read its own screen; asked later which apps had been on its screen, it answered from Luci without being told to.
 
 ```
-Install Luci Core on this machine and connect it to yourself. Show me the full output of each step. If a step fails, stop and show me; don't work around it.
+Install Luci on your computer so you can see and search what has been on its screens. Show me the output of each step. If a step fails, stop and show me; don't work around it.
 
-1. Run: curl -fsSL https://raw.githubusercontent.com/Memories-ai-labs/luci-core-releases/main/install.sh | sh -s -- --data-dir /workspace/.luci
-   If /workspace doesn't exist, leave out everything after "| sh".
-2. Register the MCP server exactly as the installer's "As one JSON block" line says. Put your own name after "grokbot:".
-3. Check it: open a terminal or text window on your screen that shows the line LUCI TEST 4821. Then run the "now" command the installer printed, and confirm the output contains LUCI TEST 4821.
+1. Install it:
+   curl -fsSL https://raw.githubusercontent.com/Memories-ai-labs/luci-core-releases/main/install.sh | sh -s -- --data-dir /workspace/.luci
+   If /workspace doesn't exist, run it without "-s -- --data-dir /workspace/.luci".
+2. Connect it: add an MCP server exactly as the installer's "As one JSON block" line says, with your name after "grokbot:". If you can't add MCP servers, skip this and use the luci command the installer printed instead.
+3. Check it: open a window on your screen that shows the text LUCI TEST 4821 (a terminal or text editor), wait 5 seconds, then call the screen_now tool (or run the printed "luci now" command). It should return LUCI TEST 4821.
 
-Always use the luci path the installer printed. Luci only sees what is drawn on your screen, so open browsers and apps in a window, not headless.
+From now on, when I ask what is or was on your screen, what you did earlier, or to find something you saw before, use Luci (screen_now, full_text_search, usage_summary, or the luci command) instead of guessing. Luci only sees what is drawn on a screen, so open browsers and apps in a window, not headless.
 ```
 
 ## Everyday commands
