@@ -47,10 +47,10 @@ curl -fsSL https://raw.githubusercontent.com/Memories-ai-labs/luci-core-releases
 Then register a stdio MCP server:
 
 ```json
-{"command": "/home/<user>/.luci/bin/luci", "args": ["mcp"], "env": {"LUCI_CLIENT": "grokbot:<bot-name>", "LUCI_DISPLAY": ":5"}}
+{"command": "/home/<user>/.luci/bin/luci", "args": ["mcp"], "env": {"LUCI_CLIENT": "grokbot:<bot-name>"}}
 ```
 
-`LUCI_DISPLAY` is the bot's own screen, the value of `$DISPLAY` in its shell. The installer fills it in when `$DISPLAY` is set. With it, tool calls that don't name a screen read and search that one; without it they cover every screen, and `screen_now` reads whichever has focus. `LUCI_CLIENT` labels the bot's calls (letters, digits, `_ : -`, up to 64 characters).
+`LUCI_CLIENT` labels the bot's calls (letters, digits, `_ : -`, up to 64 characters). Luci records every screen on the machine; `screen_now` without a `display_id` reads the screen in use, the one whose foreground window changed last. To pin one screen, add `"LUCI_DISPLAY": ":5"`: tool calls that don't name a screen then read and search only that one. Pin it only when the bot always works on the same screen: on Grok Bot a bot can land on a different screen each session.
 
 ### Muse
 
@@ -86,7 +86,7 @@ Always use the luci path the installer printed. Luci only sees what is drawn on 
 ## Everyday commands
 
 ```
-luci now                          # what is on your screen ($DISPLAY) right now
+luci now                          # the screen in use, right now
 luci now --display :1 --json      # one screen, as JSON
 luci search "invoice" --tr 24h    # search the last 24 hours
 luci-core status                  # is it running, which screens
