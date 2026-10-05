@@ -8,7 +8,7 @@ This repository holds the installer and the release downloads. The source code i
 
 - Linux on x86_64. arm64 has no release yet.
 - An X11 display or Xvfb. Wayland sessions are not captured.
-- `curl` and `tar`. The installer fetches Node 22 unless the machine already has Node 22 (a newer Node can't load its database module), and installs the runtime libraries it can (with `sudo` or as root).
+- `curl` and `tar`. The installer installs the runtime libraries it can (with `sudo` or as root). Luci is a single executable with its own Node, so the machine needs no Node at all.
 
 ## Install
 
