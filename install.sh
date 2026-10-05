@@ -555,14 +555,17 @@ reinstall_hint() {
     echo "Reinstall with: curl -fsSL @INSTALL_URL@ | sh" >&2
   fi
 }
+# Some cloud desktops (Grok Bot) carry ~/.luci over to a new machine but leave
+# node_modules folders behind, so a missing one counts as damage too.
+intact() { [ -n "$node" ] && [ -f "$target" ] && [ -d "$core/current/node_modules" ]; }
 pick_node
-if [ -z "$node" ] || [ ! -f "$target" ]; then
+if ! intact; then
   if [ -f "$core/install.sh" ]; then
     echo "Luci core is missing or damaged. Repairing..." >&2
     sh "$core/install.sh" --repair >&2 </dev/null || { echo "Repair failed." >&2; reinstall_hint; exit 1; }
     pick_node
   fi
-  if [ -z "$node" ] || [ ! -f "$target" ]; then
+  if ! intact; then
     echo "Luci core is missing." >&2
     reinstall_hint
     exit 1
