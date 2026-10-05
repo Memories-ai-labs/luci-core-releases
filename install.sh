@@ -8,6 +8,9 @@
 # scripts/promote-release.sh copies it over. Assets: https://github.com/Memories-ai-labs/luci-core-releases/releases
 # latest = releases/latest/download/, --version <v> = releases/download/v<v>/.
 # Each holds luci-core-linux-<x64|arm64>.tar.gz, ocr-zh-v1.tar.gz and SHA256SUMS.
+# The core tarball holds one executable, luci-core: Node and all of Luci in a
+# single file. It unpacks what it needs into ~/.cache/luci-core on first run
+# and again whenever that copy goes missing, so nothing else needs installing.
 #
 # Options:
 #   --version <v>          Core version to install (default: latest)
@@ -30,12 +33,6 @@
 # LUCI_INSTALL_ALLOW_HTTP=1 accepts non-https sources (a local test mirror).
 set -eu
 
-NODE_VERSION="22.23.3"
-# process.versions.modules of Node 22. The native modules in the tarball are built
-# for it, so any other Node (24 included) can load the code but not the database.
-NODE_ABI="127"
-NODE_SHA256_X64="1084aa36196bba4c3a5e69a1ee388a6e4ff729dad09445fbcd434b28fe3c24af"
-NODE_SHA256_ARM64="5ced2d48d1d7198739b7f86804de0171aefb6823b684b12341d3321afc3cb0b2"
 RELEASE_ROOT="https://github.com/Memories-ai-labs/luci-core-releases/releases"
 INSTALL_URL="https://raw.githubusercontent.com/Memories-ai-labs/luci-core-releases/main/install.sh"
 PORT=8765
@@ -54,6 +51,7 @@ DRY=0
 PURGE=0
 TMP=""
 STAGE=""
+RUNTIME_DIR=""
 
 say() { printf '%s\n' "$*"; }
 warn() { printf 'Warning: %s\n' "$*" >&2; }
@@ -75,6 +73,8 @@ Type=simple
 ExecStart=%h/.luci/bin/luci-core serve
 Restart=on-failure
 RestartSec=5
+# 6: Luci couldn't unpack itself (no disk space); retrying every 5 s won't help.
+RestartPreventExitStatus=6
 Nice=10
 Environment=LUCI_CORE_SUPERVISED=systemd
 
@@ -293,38 +293,7 @@ install_libs() {
   fi
 }
 
-# ---------------------------------------------------------------- 3. node
-
-node_abi() { "$1" -p 'process.versions.modules' 2>/dev/null || echo 0; }
-
-record_node() { # path; lets the shims find Node when the service PATH is minimal
-  [ "$DRY" = 1 ] || { mkdir -p "$CORE_DIR" && printf '%s\n' "$1" >"$CORE_DIR/node-path"; }
-}
-
-ensure_node() {
-  if have node && [ "$(node_abi node)" = "$NODE_ABI" ]; then
-    say "Node: using $(command -v node) ($(node -v))"
-    record_node "$(command -v node)"
-    return 0
-  fi
-  if [ -x "$CORE_DIR/node/bin/node" ] && [ "$(node_abi "$CORE_DIR/node/bin/node")" = "$NODE_ABI" ]; then
-    say "Node: using bundled $("$CORE_DIR/node/bin/node" -v)"
-    return 0
-  fi
-  if [ "$DRY" = 1 ]; then plan "download Node $NODE_VERSION to $CORE_DIR/node"; return 0; fi
-  case $ARCH in x64) want=$NODE_SHA256_X64 ;; *) want=$NODE_SHA256_ARM64 ;; esac
-  name="node-v$NODE_VERSION-linux-$ARCH.tar.gz"
-  say "Node: downloading $NODE_VERSION"
-  ensure_tmp
-  fetch "https://nodejs.org/dist/v$NODE_VERSION/$name" "$TMP/$name"
-  verify_sha "$TMP/$name" "$want" "Node"
-  mkdir -p "$CORE_DIR/node.new.$$"
-  tar -xzf "$TMP/$name" -C "$CORE_DIR/node.new.$$" --strip-components=1
-  rm -rf "$CORE_DIR/node"
-  mv "$CORE_DIR/node.new.$$" "$CORE_DIR/node"
-}
-
-# ---------------------------------------------------------------- 4. tarball
+# ---------------------------------------------------------------- 3. tarball
 
 release_base() { # [version]  (empty = latest)
   if [ -n "${LUCI_RELEASE_BASE:-}" ]; then
@@ -435,8 +404,11 @@ stop_running() {
   ! kill -0 "$pid" 2>/dev/null || warn "Luci is still shutting down."
 }
 
-check_grab_libs() { # warn about shared libraries luci-grab can't resolve
-  grab="$CORE_DIR/$VERSION/resources/bin/luci-grab"
+# Unpack the runtime now rather than on the agent's first call, then check the
+# libraries luci-grab links against.
+prepare_runtime() {
+  RUNTIME_DIR=$("$CORE_DIR/$VERSION/luci-core" --print-runtime-dir </dev/null) || { warn "Luci couldn't finish setting itself up; it tries again on its next start."; RUNTIME_DIR=""; return 0; }
+  grab="$RUNTIME_DIR/resources/bin/luci-grab"
   [ -f "$grab" ] && have ldd || return 0
   missing_libs=$(ldd "$grab" </dev/null 2>&1 | awk '/not found/ { printf "%s ", $1 }')
   [ -z "$missing_libs" ] || warn "Screen capture needs libraries that are missing: ${missing_libs}Try: sudo apt-get install -y $LIB_PACKAGES"
@@ -451,7 +423,10 @@ install_tarball() {
   top=""
   for d in "$STAGE"/*/; do [ -d "$d" ] && top=${d%/}; done
   [ -n "$top" ] || die "The tarball is empty."
-  if [ ! -f "$top/luci-core.cjs" ] || [ ! -f "$top/cli/luci-cli.cjs" ]; then die "The tarball doesn't look like a Luci core build."; fi
+  if [ ! -f "$top/luci-core" ]; then
+    [ ! -f "$top/luci-core.cjs" ] || die "That tarball is a Luci core older than 0.2.0. Install it with the install.sh inside it."
+    die "The tarball doesn't look like a Luci core build."
+  fi
   if [ -f "$top/VERSION" ]; then
     found=$(tr -d ' \r\n' <"$top/VERSION")
   else
@@ -464,21 +439,28 @@ install_tarball() {
   VERSION=$found
   PREV=""
   if [ -L "$CORE_DIR/current" ]; then PREV=$(readlink "$CORE_DIR/current"); PREV=${PREV##*/}; fi
+  # Run it once before touching the installed version: a wrong CPU, a glibc
+  # that's too old or no room to unpack stops here, with the old one intact.
+  chmod +x "$top/luci-core"
+  "$top/luci-core" --print-runtime-dir </dev/null >/dev/null || die "This Luci core build can't run on this machine."
   stop_running
   rm -rf "${CORE_DIR:?}/$VERSION"
   mv "$top" "$CORE_DIR/$VERSION"
-  chmod +x "$CORE_DIR/$VERSION/luci-core.cjs" "$CORE_DIR/$VERSION/cli/luci-cli.cjs" 2>/dev/null || true
-  [ ! -f "$CORE_DIR/$VERSION/resources/bin/luci-grab" ] || chmod +x "$CORE_DIR/$VERSION/resources/bin/luci-grab"
+  chmod +x "$CORE_DIR/$VERSION/luci-core"
   atomic_link "$VERSION" "$CORE_DIR/current"
   printf '%s\n' "$VERSION" >"$CORE_DIR/version"
-  check_grab_libs
-  # Keep the new and the previous version (rollback); drop older ones.
+  prepare_runtime
+  # Keep the new and the previous version (rollback); drop older ones. Before
+  # 0.2.0 a version was a folder of scripts plus node_modules run by a separate
+  # Node; those can't be rolled back to with the new shims, so they go too.
   for d in "$CORE_DIR"/[0-9]*/; do
     [ -d "$d" ] || continue
     b=${d%/}
     b=${b##*/}
-    [ "$b" = "$VERSION" ] || [ "$b" = "$PREV" ] || rm -rf "${CORE_DIR:?}/$b"
+    if [ "$b" = "$VERSION" ] || { [ "$b" = "$PREV" ] && [ -f "$d/luci-core" ]; }; then continue; fi
+    rm -rf "${CORE_DIR:?}/$b"
   done
+  rm -rf "$CORE_DIR/node" "$CORE_DIR/node-path"
   # Self-repair copy: prefer the one shipped in the tarball, else this script if it's a real file.
   # (When this run *is* the self-repair copy, cp would fail on identical files; that is fine.)
   if [ -f "$CORE_DIR/$VERSION/install.sh" ]; then
@@ -538,15 +520,7 @@ setup_data_dir() {
 SHIM_TEMPLATE='#!/bin/sh
 # Managed by the Luci installer. Changes are overwritten on upgrade.
 core="$HOME/.luci/core"
-target="$core/@TARGET@"
-pick_node() {
-  node=""
-  if [ -x "$core/node/bin/node" ]; then node="$core/node/bin/node"
-  else
-    [ ! -f "$core/node-path" ] || node=$(cat "$core/node-path")
-    if [ -z "$node" ] || [ ! -x "$node" ]; then node=$(command -v node 2>/dev/null || true); fi
-  fi
-}
+exe="$core/current/luci-core"
 reinstall_hint() {
   if [ -f "$core/install-source" ]; then
     echo "Reinstall from a Luci core tarball: sh $core/install.sh --from-tarball <file>" >&2
@@ -555,27 +529,24 @@ reinstall_hint() {
     echo "Reinstall with: curl -fsSL @INSTALL_URL@ | sh" >&2
   fi
 }
-# Some cloud desktops (Grok Bot) carry ~/.luci over to a new machine but leave
-# node_modules folders behind, so a missing one counts as damage too.
-intact() { [ -n "$node" ] && [ -f "$target" ] && [ -d "$core/current/node_modules" ]; }
-pick_node
-if ! intact; then
+if [ ! -x "$exe" ]; then
   if [ -f "$core/install.sh" ]; then
     echo "Luci core is missing or damaged. Repairing..." >&2
     sh "$core/install.sh" --repair >&2 </dev/null || { echo "Repair failed." >&2; reinstall_hint; exit 1; }
-    pick_node
   fi
-  if ! intact; then
+  if [ ! -x "$exe" ]; then
     echo "Luci core is missing." >&2
     reinstall_hint
     exit 1
   fi
 fi
-exec "$node" "$target" "$@"
+exec "$exe" @ARGS@"$@"
 '
 
-write_shim() { # name target
-  printf '%s' "$SHIM_TEMPLATE" | sed "s|@TARGET@|$2|; s|@INSTALL_URL@|$INSTALL_URL|g" | write_file "$BIN_DIR/$1" 0755
+write_shim() { # name [first argument for the executable]
+  args=""
+  [ -z "${2:-}" ] || args="$2 "
+  printf '%s' "$SHIM_TEMPLATE" | sed "s|@ARGS@|$args|; s|@INSTALL_URL@|$INSTALL_URL|g" | write_file "$BIN_DIR/$1" 0755
 }
 
 link_local_bin() { # name
@@ -593,8 +564,8 @@ install_shims() {
     return 0
   fi
   mkdir -p "$BIN_DIR" "$LOCAL_BIN"
-  write_shim luci "current/cli/luci-cli.cjs"
-  write_shim luci-core "current/luci-core.cjs"
+  write_shim luci --luci-cli
+  write_shim luci-core
   link_local_bin luci
   link_local_bin luci-core
   case ":$PATH:" in *":$LOCAL_BIN:"*) ;; *) say "Add to PATH: export PATH=\"$LOCAL_BIN:\$PATH\" (until then, run $BIN_DIR/luci)" ;; esac
@@ -611,7 +582,7 @@ write_discovery() {
   {
     printf '{\n'
     printf '  "appPath": "%s",\n' "$(json_escape "$BIN_DIR/luci-core")"
-    printf '  "cliJs": "%s",\n' "$(json_escape "$CORE_DIR/current/cli/luci-cli.cjs")"
+    printf '  "cliJs": "%s",\n' "$(json_escape "${RUNTIME_DIR:+$RUNTIME_DIR/cli/luci-cli.cjs}")"
     printf '  "shim": "%s",\n' "$(json_escape "$BIN_DIR/luci")"
     printf '  "port": %s,\n' "$PORT"
     printf '  "version": "%s",\n' "$(json_escape "$VERSION")"
@@ -699,7 +670,7 @@ install_ocr_zh() {
 
 do_uninstall() {
   if [ "$DRY" = 1 ]; then
-    plan "stop and disable $UNIT_NAME; remove $CORE_DIR, $BIN_DIR/luci*, $LOCAL_BIN/luci*"
+    plan "stop and disable $UNIT_NAME; remove $CORE_DIR, the unpacked copy in ~/.cache/luci-core, $BIN_DIR/luci*, $LOCAL_BIN/luci*"
     [ "$PURGE" = 0 ] || plan "remove $LUCI_DIR"
     return 0
   fi
@@ -723,6 +694,10 @@ do_uninstall() {
     rm -f "$LUCI_DIR/cli.json" "$LUCI_DIR/cli-token"
   fi
   rm -rf "$CORE_DIR"
+  # What the executable unpacked, wherever it went (core/sea/runtime.ts runtimeBases).
+  case ${XDG_CACHE_HOME:-} in /*) cache=$XDG_CACHE_HOME ;; *) cache="$HOME/.cache" ;; esac
+  rm -rf "$cache/luci-core" "$LUCI_DIR/runtime" "${TMPDIR:-/tmp}/luci-core-$(id -u)"
+  case ${LUCI_RUNTIME_DIR:-} in /*) rm -rf "$LUCI_RUNTIME_DIR/luci-core" ;; esac
   if [ "$PURGE" = 1 ]; then
     if [ -L "$LUCI_DIR" ]; then
       say "Removed the $LUCI_DIR link. Data in $(readlink "$LUCI_DIR") is kept; delete it by hand if you want it gone."
@@ -778,7 +753,6 @@ main() {
   report_environment
   setup_data_dir
   install_libs
-  ensure_node
   if [ -z "$FROM_TARBALL" ]; then resolve_version; fi
   if [ "$DRY" = 1 ]; then
     say "Version: ${VERSION:-from the tarball}"
